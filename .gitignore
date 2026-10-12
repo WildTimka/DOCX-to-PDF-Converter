@@ -1,0 +1,6 @@
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.test
+DOCX_to_PDF_REBUILT_x64.exe
