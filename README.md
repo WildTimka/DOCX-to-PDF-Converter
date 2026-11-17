@@ -1,83 +1,56 @@
-# DOCX to PDF Converter
+# DOCX-to-PDF Converter v1.1.0
 
-Batch convert Microsoft Word DOCX documents into print quality PDFs on Windows x64. The application automates Microsoft Word through COM. **Microsoft Word is required for conversion.** Python is not required.
+Batch convert DOCX documents into print-quality PDFs with a compact native Windows GUI. Microsoft Word desktop is required. The standalone Windows x64 executable needs neither Go nor Python installed.
 
-## Download
+## Requirements and use
 
-Download the validated Windows executable from the [DOCX to PDF Converter releases](https://github.com/WildTimka/DOCX-to-PDF-Converter/releases/latest). Place `DOCX_to_PDF_FINAL_x64.exe` in the folder containing the DOCX files, then run it. PDFs are written beside their source documents.
+Windows 10/11 x64, installed and activated Microsoft Word desktop (32-bit or 64-bit), a usable printer, write access beside the documents, and free temporary space on C:. Open Word once to finish first-run dialogs before conversion.
 
-## Features
+1. Download the Windows x64 executable from the GitHub releases page.
+2. Run it, browse to a folder or enter its path, then select Convert.
+3. Follow the progress counter. PDFs are written beside the original documents; existing PDFs with matching names are overwritten after conversion completes.
+4. Select Cancel, or close the window, to request cancellation and wait for cleanup. Cancellation before publication preserves existing PDFs and publishes no new PDFs from that batch.
 
-- Finds DOCX files directly alongside the executable; it does not search subfolders and skips Word lock files whose names start with `~$`.
-- Processes up to 10 documents sequentially with one Word worker. With more than 10 documents, it starts two Word workers and distributes jobs from a shared queue as workers become available.
-- Allows up to 30 seconds for Word workers to start. If the second worker cannot start, processing continues with one worker.
-- Restarts a worker and retries a failed document once. Remaining queued work can continue on another live worker; individual failures are reported.
-- Uses Microsoft Word's fixed format PDF export with print quality settings.
-- Prints progress, per document status, totals, and total elapsed time in the console.
-- Runs as a standalone Windows x64 executable without Python or third party Go packages.
+Only DOCX files directly in the selected folder are included; subfolders and Word lock files beginning with ~$ are skipped. Original DOCX files are not modified. No concurrency settings are necessary.
 
-## Requirements
+## Adaptive Word workers
 
-- Windows 10 or later, 64 bit.
-- Microsoft Word desktop installed, activated, and available through COM automation.
-- Write permission in the folder containing the documents.
-- For documents on another drive, free space and write permission in a temporary directory on drive C:.
-- Microsoft Print to PDF when the current default printer cannot be used for PDF export.
+The engine starts converting as soon as the first isolated Word worker is ready. Additional Word COM instances initialize sequentially while ready workers draw documents from a shared queue. Workers are reused for the batch and replaced after conversion failures when appropriate; a failed document is retried once. Additional-worker startup failure leaves existing workers processing the queue.
 
-## Quick start
+| Documents | Target workers |
+|---|---:|
+| 1 | 1 |
+| 2 | 2 |
+| 3–5 | 3 |
+| 6–29 | 4 |
+| 30–59 | 5 |
+| 60–79 | 6 |
+| 80+ | 7 |
 
-1. Install and open Microsoft Word once so initial setup dialogs are complete.
-2. Download `DOCX_to_PDF_FINAL_x64.exe` from the [latest release](https://github.com/WildTimka/DOCX-to-PDF-Converter/releases/latest).
-3. Copy the executable next to the DOCX documents to convert.
-4. Run the executable and leave its console open until it reports completion.
-5. Review the created PDF files and any per document errors in the console.
+These are upper targets calibrated on one workload, not universal optima. Logical CPU count, available memory (2 GiB reserve and 512 MiB per worker), verified process ownership, and observed startup cost versus remaining work can reduce concurrency. Unknown resource capacity falls back to one worker. There are no periodic worker restarts.
 
-The application uses the executable's folder as its input folder. For example, if `C:\\Invoices\\DOCX_to_PDF_FINAL_x64.exe` is beside `January.docx`, it writes `January.pdf` in `C:\\Invoices\\`.
+Word process handles are pinned after ownership verification; unrelated user Word instances must never be terminated. Each worker owns its own STA COM object. The engine stages PDFs before publication, removes temporary conversion files, and restores the saved default printer after completion, cancellation or handled failure. Printer selection is temporarily system-wide: run one batch at a time and avoid forcibly terminating the application. Non-C: input files are staged in a writable C: temporary directory.
 
-## Parallel processing
+## Build and test
 
-For 10 or fewer DOCX files, one Word worker processes documents in sequence. For 11 or more, the program attempts to run two separate Word COM workers. They draw jobs from a shared queue, so a faster worker can take more documents. When the second Word instance fails to start, the first worker handles the batch alone. A failed conversion is retried once after restarting its worker; a persistent failure is recorded while remaining jobs continue where possible.
-
-## Printer management
-
-The program reads the current default printer and selects Microsoft Print to PDF if its printer check determines a switch is needed. It restores the saved default printer after processing, including ordinary conversion errors. Printer selection is system wide while the application runs, so wait for completion and avoid forcibly terminating the program.
-
-## Temporary file handling
-
-When the source folder is on C:, documents are processed in place without an extra cache copy. When it is on another drive, the program stages DOCX files in a temporary directory on C:, processes those copies, then publishes the PDFs beside the originals. The temporary cache is removed after processing.
-
-## Build from source
-
-Install Go 1.23 or later on Windows, then run this from the project root:
+Install Go 1.23 or later on Windows. The release was built with Go 1.26.9 windows/amd64. From this source root:
 
 ```powershell
+.\build\test.ps1
 .\build\build.ps1
 ```
 
-The script sets `GOOS=windows`, `GOARCH=amd64`, and `CGO_ENABLED=0`. It builds from `src/`, where `word_worker.ps1` is embedded into the Go executable through `//go:embed`. The output is `DOCX_to_PDF_REBUILT_x64.exe` in the project root. Word is not needed to compile, but is required when running the converter.
+Output: dist/DOCX_to_PDF_Converter_v1.1.0_Windows_x64.exe. Both scripts accept -Go with a compiler path; build also accepts -Output. The build embeds src/word_worker.ps1, disables CGO, trims paths and uses the Windows GUI subsystem (no console). No third-party Go modules or application runtime dependencies are added. Buildvcs is disabled for byte-for-byte reproduction from the source ZIP as well as Git; the release manifest associates the artifact with its exact commit and hashes. Reproduction requires the same compiler version and build flags.
 
-Builds from reconstructed source are for development and evaluation. Test them on Windows with Word and a representative batch before distributing them. The build script exits with an error if `go build` fails.
+The automated suite does not require Word. Real conversion validation requires Windows and Word; see TESTING.md. VERSION and the linker version value must agree when preparing another release.
 
-## Troubleshooting
+## Troubleshooting and limitations
 
-- **No files found:** Make sure the executable is in the same folder as the `.docx` files. Nested folders are not scanned; lock files beginning with `~$` are ignored.
-- **Word does not start:** Install/activate desktop Microsoft Word, launch it once interactively, and confirm Windows can create a Word COM automation instance.
-- **PDF export fails:** Try opening and exporting the document directly in Word. Check that a usable printer is installed and that Microsoft Print to PDF is enabled if needed.
-- **Files on another drive fail:** Check free space on C: and write access to the user's temporary directory.
-- **A document reports an error:** Close it in Word and rerun it individually. Complex or damaged documents may fail or exceed the processing timeout.
-- **Printer was not restored:** If the application was terminated during processing, select the prior printer again in Windows printer settings.
+- No documents: select the folder containing DOCX files, not its parent.
+- Word startup failure: complete Word activation/first-run prompts and verify documents open normally. Additional-worker failure falls back to the ready workers.
+- Export failure: open/export the document in Word; damaged, protected, interactive or unusually complex documents can fail. Worker startup timeout is 30 seconds; document timeout is 5 minutes.
+- Temporary-folder failure: check free space and write permissions on C:.
+- Printer changed after forced termination: reselect the prior default printer in Windows. Normal cancellation waits for restoration; a forced process/OS termination cannot guarantee cleanup.
+- Performance varies with documents, Word build, storage and background load. Seven is a practical tested ceiling, not a guarantee on every machine. A COM activation hang before ownership can be established remains a known limitation; unidentified processes are never forcibly terminated.
 
-## Known limitations
-
-- Windows x64 only; Microsoft Word desktop is mandatory.
-- Only DOCX files in the executable's immediate directory are processed.
-- Word dialogs, damaged documents, unusual COM registration, or long running documents can interrupt conversion.
-- Printer changes are system wide until processing finishes; forced termination may bypass normal restoration.
-- Output PDFs with matching names may be overwritten.
-- Performance varies with Word, the documents, storage, and the computer.
-
-## Source provenance and validation
-
-The original Go source used for the validated executable was not preserved. `src/main.go` was reconstructed from the released executable's embedded PowerShell worker and observed behavior. `src/word_worker.ps1` is the extracted worker. The source is available for continued development but is not represented as the exact historical source or as behaviorally equivalent to the release.
-
-The supplied `DOCX_to_PDF_FINAL_x64.exe` is the known validated version. The project owner reports it converted 177 DOCX documents with zero errors in about 3 minutes 28 seconds on their Windows computer. This result applies to that executable. Reconstructed source builds have not been functionally validated with Windows and Word and must not be treated as stable releases until tested. No screen optimized PDF mode or development debug output is included.
+See RELEASE_NOTES_v1.1.0.md for historical measurements and validation limits. v1.0.0 remains preserved with its original assets; its reconstructed source is historical. This release uses the later GUI v5 source and validated adaptive engine, rather than claiming to reproduce the v1.0.0 binary.
